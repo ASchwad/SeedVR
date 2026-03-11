@@ -254,6 +254,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 ).unsqueeze(0) / 255.0
                 if sp_size > 1:
                     raise ValueError("Sp size should be set to 1 for image inputs!")
+                fps_lists.append(0)
             else:
                 video, _, info = read_video(
                     os.path.join(video_path, video), output_format="TCHW"

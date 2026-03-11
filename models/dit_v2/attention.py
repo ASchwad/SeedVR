@@ -15,9 +15,23 @@
 import torch
 import torch.nn.functional as F
 
-from flash_attn import flash_attn_varlen_func
-
 from torch import nn
+
+
+def _varlen_attn(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, dropout_p=0.0, softmax_scale=None, causal=False, **kwargs):
+    """Drop-in replacement for flash_attn_varlen_func using PyTorch SDPA."""
+    batch_size = len(cu_seqlens_q) - 1
+    outputs = []
+    for i in range(batch_size):
+        sq_start, sq_end = cu_seqlens_q[i], cu_seqlens_q[i + 1]
+        sk_start, sk_end = cu_seqlens_k[i], cu_seqlens_k[i + 1]
+        qi = q[sq_start:sq_end].unsqueeze(0).transpose(1, 2)
+        ki = k[sk_start:sk_end].unsqueeze(0).transpose(1, 2)
+        vi = v[sk_start:sk_end].unsqueeze(0).transpose(1, 2)
+        oi = F.scaled_dot_product_attention(qi, ki, vi, dropout_p=dropout_p, scale=softmax_scale, is_causal=causal)
+        outputs.append(oi.transpose(1, 2).squeeze(0))
+    return torch.cat(outputs, dim=0)
+
 
 class TorchAttention(nn.Module):
     def tflops(self, args, kwargs, output) -> float:
@@ -42,5 +56,5 @@ class FlashAttentionVarlen(nn.Module):
         return h * (4 * d * (seqlens_q * seqlens_k).sum())
 
     def forward(self, *args, **kwargs):
-        kwargs["deterministic"] = torch.are_deterministic_algorithms_enabled()
-        return flash_attn_varlen_func(*args, **kwargs)
+        kwargs.pop("deterministic", None)
+        return _varlen_attn(*args, **kwargs)
